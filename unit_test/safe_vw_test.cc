@@ -20,7 +20,9 @@ void get_model_data_from_raw(const char* data, unsigned int len, model_managemen
 
 BOOST_AUTO_TEST_CASE(safe_vw_1)
 {
-  safe_vw vw((const char*)cb_data_5_model, cb_data_5_model_len);
+  model_management::model_data model_data;
+  get_model_data_from_raw((const char*)cb_data_5_model, cb_data_5_model_len, &model_data);
+  safe_vw vw(model_data);
   const auto json = R"({"a":{"0":1,"5":2},"_multi":[{"b":{"0":1}},{"b":{"0":2}},{"b":{"0":3}}]})";
 
   std::vector<int> actions;
@@ -34,7 +36,9 @@ BOOST_AUTO_TEST_CASE(safe_vw_1)
 
 BOOST_AUTO_TEST_CASE(safe_vw_audit_logs)
 {
-  safe_vw vw((const char*)cb_data_5_model, cb_data_5_model_len, "--json --quiet");
+  model_management::model_data model_data;
+  get_model_data_from_raw((const char*)cb_data_5_model, cb_data_5_model_len, &model_data);
+  safe_vw vw(model_data, "--json --quiet");
   const auto json = R"({"a":{"0":1,"5":2},"_multi":[{"b":{"0":1}},{"b":{"0":2}},{"b":{"0":3}}]})";
 
   std::vector<int> actions;
@@ -43,7 +47,7 @@ BOOST_AUTO_TEST_CASE(safe_vw_audit_logs)
 
   BOOST_CHECK_EQUAL(0, vw.get_audit_data().size());
 
-  safe_vw vw_w_audit((const char*)cb_data_5_model, cb_data_5_model_len, "--json --audit");
+  safe_vw vw_w_audit(model_data, "--json --audit");
   vw_w_audit.rank(json, actions, ranking);
 
   BOOST_CHECK_LT(0, vw_w_audit.get_audit_data().size());

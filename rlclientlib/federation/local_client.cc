@@ -4,6 +4,7 @@
 #include "constants.h"
 #include "err_constants.h"
 #include "trace_logger.h"
+#include "utility/vw_helpers.h"
 #include "utility/vw_logger_adapter.h"
 #include "vw/config/options_cli.h"
 #include "vw/core/global_data.h"
@@ -29,13 +30,7 @@ int local_client::try_get_model(const std::string& app_id,
   {
     case state_t::model_available:
     {
-      io_buf buf;
-      auto backing_buffer = std::make_shared<std::vector<char>>();
-      buf.add_file(VW::io::create_vector_writer(backing_buffer));
-      VW::save_predictor(*_current_model, buf);
-      auto* dest_ptr = data.alloc(backing_buffer->size());
-      std::memcpy(dest_ptr, backing_buffer->data(), backing_buffer->size());
-      data.increment_refresh_count();
+      RETURN_IF_FAIL(utility::save_vw_model(data, *_current_model, _trace_logger, status));
       model_received = true;
       _state = state_t::model_retrieved;
       // Return current model and switch into model retrieved.
@@ -86,11 +81,8 @@ int local_client::create(std::unique_ptr<i_federated_client>& output, const util
   // Create empty model based on ML args on first call
   std::string initial_command_line(config.get(
       name::MODEL_VW_INITIAL_COMMAND_LINE, "--cb_explore_adf --json --quiet --epsilon 0.0 --first_only --id N/A"));
-
-  // TODO try catch
-  auto args = VW::make_unique<VW::config::options_cli>(VW::split_command_line(initial_command_line));
-  auto logger = utility::make_vw_trace_logger(trace_logger);
-  auto workspace = VW::initialize_experimental(std::move(args), nullptr, nullptr, nullptr, &logger);
+  std::unique_ptr<VW::workspace> workspace;
+  RETURN_IF_FAIL(utility::create_new_vw_model(workspace, initial_command_line, trace_logger, status));
 
   output = std::unique_ptr<i_federated_client>(new local_client(std::move(workspace), trace_logger));
   return error_code::success;

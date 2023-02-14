@@ -34,7 +34,7 @@ int vw_model::update(const model_data& data, bool& model_ready, api_status* stat
     {
       std::string cmd_line = add_optional_audit_flag(_quiet_commandline_options);
 
-      std::unique_ptr<safe_vw> init_vw(new safe_vw(data.data(), data.data_sz(), cmd_line));
+      std::unique_ptr<safe_vw> init_vw(new safe_vw(data, cmd_line));
       if (init_vw->is_CB_to_CCB_model_upgrade(_initial_command_line))
       {
         cmd_line = add_optional_audit_flag(_upgrade_to_CCB_vw_commandline_options);

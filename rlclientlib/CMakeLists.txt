@@ -92,6 +92,7 @@ set(PROJECT_SOURCES
   utility/context_helper.cc
   utility/data_buffer.cc
   utility/data_buffer_streambuf.cc
+  utility/vw_helpers.cc
   utility/vw_logger_adapter.cc
   vw_model/pdf_model.cc
   vw_model/safe_vw.cc
@@ -175,6 +176,7 @@ set(PROJECT_PRIVATE_HEADERS
   utility/object_pool.h
   utility/periodic_background_proc.h
   utility/watchdog.h
+  utility/vw_helpers.h
   utility/vw_logger_adapter.h
   vw_model/pdf_model.h
   vw_model/safe_vw.h

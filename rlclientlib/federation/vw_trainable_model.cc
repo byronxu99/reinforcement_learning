@@ -6,6 +6,7 @@
 #include "joiners/multistep_example_joiner.h"
 #include "parse_example_binary.h"
 #include "str_util.h"
+#include "utility/vw_helpers.h"
 #include "utility/vw_logger_adapter.h"
 #include "vw/config/options_cli.h"
 #include "vw/core/learner.h"
@@ -98,87 +99,50 @@ trainable_vw_model::trainable_vw_model(std::string command_line, std::string pro
     , _reward_function(std::move(reward_function))
     , _trace_logger(trace_logger)
 {
-  auto options = VW::make_unique<VW::config::options_cli>(VW::split_command_line(_command_line));
-  auto logger = utility::make_vw_trace_logger(_trace_logger);
-  _model = VW::initialize_experimental(std::move(options), nullptr, nullptr, nullptr, &logger);
-  copy_current_model_to_starting();
+  {
+    // Initialize _model
+    // Don't use utility::create_new_vw_model because we can't return error codes in a constructor
+    auto options = VW::make_unique<VW::config::options_cli>(VW::split_command_line(_command_line));
+    auto logger = utility::make_vw_trace_logger(_trace_logger);
+    _model = VW::initialize_experimental(std::move(options), nullptr, nullptr, nullptr, &logger);
+  }
+  {
+    // Initialize _starting_model identically
+    auto options = VW::make_unique<VW::config::options_cli>(VW::split_command_line(_command_line));
+    auto logger = utility::make_vw_trace_logger(_trace_logger);
+    _starting_model = VW::initialize_experimental(std::move(options), nullptr, nullptr, nullptr, &logger);
+  }
 }
 
 int trainable_vw_model::set_model(std::unique_ptr<VW::workspace>&& model, api_status* status)
 {
-  try
   {
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      _model = std::move(model);
-    }
-    copy_current_model_to_starting();
+    std::lock_guard<std::mutex> lock(_mutex);
+    _model = std::move(model);
   }
-  catch (const std::exception& e)
-  {
-    RETURN_ERROR_ARG(_trace_logger, status, model_update_error, e.what());
-  }
-  catch (...)
-  {
-    RETURN_ERROR_ARG(_trace_logger, status, model_update_error, "Unknown error");
-  }
+  RETURN_IF_FAIL(copy_current_model_to_starting(status));
   return error_code::success;
 }
 
 int trainable_vw_model::set_data(const model_management::model_data& data, api_status* status)
 {
-  try
   {
-    auto opts =
-        std::unique_ptr<VW::config::options_i>(new VW::config::options_cli(VW::split_command_line(_command_line)));
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      auto logger = utility::make_vw_trace_logger(_trace_logger);
-      _model = VW::initialize_experimental(
-          std::move(opts), VW::io::create_buffer_view(data.data(), data.data_sz()), nullptr, nullptr, &logger);
-    }
-    copy_current_model_to_starting();
+    std::lock_guard<std::mutex> lock(_mutex);
+    RETURN_IF_FAIL(utility::load_vw_model(_model, data, _command_line, _trace_logger, status));
   }
-  catch (const std::exception& e)
-  {
-    RETURN_ERROR_ARG(_trace_logger, status, model_update_error, e.what());
-  }
-  catch (...)
-  {
-    RETURN_ERROR_ARG(_trace_logger, status, model_update_error, "Unknown error");
-  }
+  RETURN_IF_FAIL(copy_current_model_to_starting(status));
   return error_code::success;
 }
 
 int trainable_vw_model::get_data(model_management::model_data& data, api_status* status)
 {
-  try
-  {
-    int example_count = 0;
-    io_buf io_buffer;
-    auto backing_buffer = std::make_shared<std::vector<char>>();
-    io_buffer.add_file(VW::io::create_vector_writer(backing_buffer));
+  std::lock_guard<std::mutex> lock(_mutex);
+  RETURN_IF_FAIL(utility::save_vw_model(data, *_model, _trace_logger, status));
 
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      example_count = _model->sd->weighted_labeled_examples;
-      VW::save_predictor(*_model, io_buffer);
-    }
-    auto* destination_buffer = data.alloc(backing_buffer->size());
-    std::memcpy(destination_buffer, backing_buffer->data(), backing_buffer->size());
-    data.increment_refresh_count();
+  int example_count = _model->sd->weighted_labeled_examples;
+  TRACE_INFO(_trace_logger,
+      utility::concat("trainable_vw_model::get_data() returning model trained on ", example_count, " examples"));
 
-    TRACE_INFO(_trace_logger,
-        utility::concat("trainable_vw_model::get_data() returning model trained on ", example_count, " examples"));
-  }
-  catch (const std::exception& e)
-  {
-    RETURN_ERROR_ARG(_trace_logger, status, model_update_error, e.what());
-  }
-  catch (...)
-  {
-    RETURN_ERROR_ARG(_trace_logger, status, model_update_error, "Unknown error");
-  }
   return error_code::success;
 }
 
@@ -304,8 +268,9 @@ int trainable_vw_model::get_model_delta(VW::model_delta& output, api_status* sta
       new_example_count = _model->sd->weighted_labeled_examples;
       delta = *_model - *_starting_model;
     }
-    copy_current_model_to_starting();
     output = std::move(delta);
+
+    RETURN_IF_FAIL(copy_current_model_to_starting(status));
 
     TRACE_INFO(_trace_logger,
         utility::concat("trainable_vw_model::get_model_delta() created model delta with ",
@@ -342,30 +307,11 @@ int trainable_vw_model::get_model_delta(VW::io::writer& output, api_status* stat
   return error_code::success;
 }
 
-void trainable_vw_model::copy_current_model_to_starting()
+int trainable_vw_model::copy_current_model_to_starting(api_status* status)
 {
-  auto backing_vector = std::make_shared<std::vector<char>>();
-  io_buf temp_buffer;
-  temp_buffer.add_file(VW::io::create_vector_writer(backing_vector));
-
-  {
-    std::lock_guard<std::mutex> lock(_mutex);
-    VW::save_predictor(*_model, temp_buffer);
-  }
-
-  auto args = VW::split_command_line(_command_line);
-  if (std::find(args.begin(), args.end(), "--preserve_performance_counters") == args.end())
-  {
-    args.emplace_back("--preserve_performance_counters");
-  }
-  auto options = VW::make_unique<VW::config::options_cli>(args);
-
-  {
-    std::lock_guard<std::mutex> lock(_mutex);
-    auto logger = utility::make_vw_trace_logger(_trace_logger);
-    _starting_model = VW::initialize_experimental(std::move(options),
-        VW::io::create_buffer_view(backing_vector->data(), backing_vector->size()), nullptr, nullptr, &logger);
-  }
+  std::lock_guard<std::mutex> lock(_mutex);
+  RETURN_IF_FAIL(utility::copy_vw_model(_starting_model, *_model, _command_line, _trace_logger, status));
+  return error_code::success;
 }
 
 void trainable_vw_model::configure_joiner(std::unique_ptr<i_joiner>& joiner) const

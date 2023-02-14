@@ -58,7 +58,8 @@ private:
   std::unique_ptr<VW::workspace> _model = nullptr;
   std::unique_ptr<VW::workspace> _starting_model = nullptr;
 
-  void copy_current_model_to_starting();
+  RL_ATTR(nodiscard)
+  int copy_current_model_to_starting(api_status* status = nullptr);
 
   const std::string _command_line;
   const std::string _problem_type;

@@ -12,7 +12,7 @@ class safe_vw
 {
   // we need to keep a reference to the master around, so it's still valid even if the factory is deleted
   std::shared_ptr<safe_vw> _master;
-  VW::workspace* _vw;
+  std::unique_ptr<VW::workspace> _vw;
   std::vector<VW::example*> _example_pool;
 
   VW::example* get_or_create_example();
@@ -20,11 +20,11 @@ class safe_vw
 
 public:
   safe_vw(std::shared_ptr<safe_vw> master);
-  safe_vw(const char* model_data, size_t len, const std::string& vw_commandline);
-  safe_vw(const char* model_data, size_t len);
+  safe_vw(const model_management::model_data& data, const std::string& vw_commandline);
+  safe_vw(const model_management::model_data& data);
   safe_vw(const std::string& vw_commandline);
 
-  ~safe_vw();
+  ~safe_vw() = default;
 
   void parse_context_with_pdf(string_view context, std::vector<int>& actions, std::vector<float>& scores);
   void rank(string_view context, std::vector<int>& actions, std::vector<float>& scores);

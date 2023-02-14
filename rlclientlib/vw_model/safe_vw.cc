@@ -1,5 +1,7 @@
 #include "safe_vw.h"
 
+#include "utility/vw_helpers.h"
+
 // VW headers
 #include "vw/config/options.h"
 #include "vw/core/debug_print.h"
@@ -21,43 +23,27 @@ static const std::string SEED_TAG = "seed=";
 
 safe_vw::safe_vw(std::shared_ptr<safe_vw> master) : _master(std::move(master))
 {
-  _vw = VW::seed_vw_model(_master->_vw, "", nullptr, nullptr);
+  std::vector<std::string> extra_args = {};
+  _vw = VW::seed_vw_model(*_master->_vw, extra_args, nullptr, nullptr);
   init();
 }
 
-safe_vw::safe_vw(const char* model_data, size_t len)
+safe_vw::safe_vw(const model_management::model_data& data)
 {
-  io_buf buf;
-  buf.add_file(VW::io::create_buffer_view(model_data, len));
-
-  _vw = VW::initialize("--quiet --json", &buf, false, nullptr, nullptr);
+  utility::load_vw_model(_vw, data, "--quiet --json");
   init();
 }
 
-safe_vw::safe_vw(const char* model_data, size_t len, const std::string& vw_commandline)
+safe_vw::safe_vw(const model_management::model_data& data, const std::string& vw_commandline)
 {
-  io_buf buf;
-  buf.add_file(VW::io::create_buffer_view(model_data, len));
-
-  _vw = VW::initialize(vw_commandline, &buf, false, nullptr, nullptr);
+  utility::load_vw_model(_vw, data, vw_commandline);
   init();
 }
 
 safe_vw::safe_vw(const std::string& vw_commandline)
 {
-  _vw = VW::initialize(vw_commandline);
+  utility::create_new_vw_model(_vw, vw_commandline);
   init();
-}
-
-safe_vw::~safe_vw()
-{
-  // cleanup examples
-  for (auto&& ex : _example_pool) { VW::dealloc_examples(ex, 1); }
-
-  // cleanup VW instance
-  VW::details::reset_source(*_vw, _vw->num_bits);
-
-  VW::finish(*_vw);
 }
 
 VW::example* safe_vw::get_or_create_example()
@@ -393,12 +379,12 @@ safe_vw* safe_vw_factory::operator()()
   if ((_master_data.data() != nullptr) && !_command_line.empty())
   {
     // Construct new vw object from raw model data and command line argument
-    return new safe_vw(_master_data.data(), _master_data.data_sz(), _command_line);
+    return new safe_vw(_master_data, _command_line);
   }
   if (_master_data.data() != nullptr)
   {
     // Construct new vw object from raw model data.
-    return new safe_vw(_master_data.data(), _master_data.data_sz());
+    return new safe_vw(_master_data);
   }
   return new safe_vw(_command_line);
 }
